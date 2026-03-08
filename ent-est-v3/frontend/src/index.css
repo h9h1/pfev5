@@ -1,0 +1,17 @@
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#0a1a0f;--surface:#0d1f12;--surface2:#122819;--surface3:#183320;
+  --border:#1e4028;--border2:#275235;
+  --accent:#2d8a4e;--accent2:#3db368;--accent3:#52cc7a;--gold:#c8a84b;
+  --success:#10b981;--warning:#f59e0b;--danger:#ef4444;
+  --text:#e8f0eb;--text2:#7aab88;--text3:#3d6b4f;
+  --font-display:'Playfair Display',serif;--font-body:'DM Sans',sans-serif;
+}
+body{background:var(--bg);color:var(--text);font-family:var(--font-body);font-size:15px;line-height:1.6;overflow-x:hidden}
+button,input,textarea,select{font-family:var(--font-body)}
+::-webkit-scrollbar{width:5px}::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:var(--border2);border-radius:3px}
+.fade-in{animation:fadeIn .35s ease}
+@keyframes fadeIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+.slide-right{animation:slideRight .25s ease}
+@keyframes slideRight{from{opacity:0;transform:translateX(30px)}to{opacity:1;transform:translateX(0)}}

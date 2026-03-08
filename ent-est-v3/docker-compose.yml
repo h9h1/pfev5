@@ -1,0 +1,161 @@
+services:
+  cassandra:
+    image: cassandra:4.1
+    
+    ports: ["9042:9042"]
+    environment:
+      CASSANDRA_CLUSTER_NAME: ent-cluster
+      CASSANDRA_DC: dc1
+      HEAP_NEWSIZE: 128M
+      MAX_HEAP_SIZE: 512M
+    volumes: [cassandra_data:/var/lib/cassandra]
+    networks: [ent-net]
+    healthcheck:
+      test: ["CMD","cqlsh","-e","describe keyspaces"]
+      interval: 30s
+      timeout: 10s
+      retries: 15
+      start_period: 90s
+
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minio_admin
+      MINIO_ROOT_PASSWORD: minio_secret_2024
+    ports: ["9000:9000","9001:9001"]
+    volumes: [minio_data:/data]
+    networks: [ent-net]
+    healthcheck:
+      test: ["CMD","curl","-f","http://localhost:9000/minio/health/live"]
+      interval: 15s
+      retries: 5
+
+  users:
+    container_name: users
+    build: ./services/users
+    environment:
+      CASSANDRA_HOSTS: cassandra
+      JWT_SECRET: super_secret_jwt_key_2024
+      EMAIL_DOMAIN: est.ac.ma
+    depends_on:
+      cassandra: {condition: service_healthy}
+    networks: [ent-net]
+
+  courses:
+    container_name: courses
+    build: ./services/courses
+    environment:
+      CASSANDRA_HOSTS: cassandra
+      JWT_SECRET: super_secret_jwt_key_2024
+      MINIO_ENDPOINT: minio:9000
+      RABBITMQ_URL: amqp://ent_user:ent_pass_2024@rabbitmq:5672/
+      MINIO_ROOT_USER: minio_admin
+      MINIO_ROOT_PASSWORD: minio_secret_2024
+    depends_on:
+      cassandra: {condition: service_healthy}
+      minio:     {condition: service_healthy}
+    networks: [ent-net]
+
+  exams:
+    container_name: exams
+    build: ./services/exams
+    environment:
+      CASSANDRA_HOSTS: cassandra
+      JWT_SECRET: super_secret_jwt_key_2024
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ROOT_USER: minio_admin
+      MINIO_ROOT_PASSWORD: minio_secret_2024
+    depends_on:
+      cassandra: {condition: service_healthy}
+      minio:     {condition: service_healthy}
+    networks: [ent-net]
+
+  messaging:
+    container_name: messaging
+    build: ./services/messaging
+    environment:
+      CASSANDRA_HOSTS: cassandra
+      JWT_SECRET: super_secret_jwt_key_2024
+      USERS_URL: http://users:8000
+      RABBITMQ_URL: amqp://ent_user:ent_pass_2024@rabbitmq:5672/
+      KEYCLOAK_URL: http://ent-est-v2-keycloak-1:8080
+      KEYCLOAK_REALM: est
+    depends_on:
+      cassandra: {condition: service_healthy}
+    networks: [ent-net]
+
+  forum:
+    container_name: forum
+    build: ./services/forum
+    environment:
+      CASSANDRA_HOSTS: cassandra
+      JWT_SECRET: super_secret_jwt_key_2024
+    depends_on:
+      cassandra: {condition: service_healthy}
+    networks: [ent-net]
+
+  calendar:
+    container_name: calendar
+    build: ./services/calendar
+    environment:
+      CASSANDRA_HOSTS: cassandra
+      JWT_SECRET: super_secret_jwt_key_2024
+    depends_on:
+      cassandra: {condition: service_healthy}
+    networks: [ent-net]
+
+  gateway:
+    container_name: gateway
+    build: ./gateway
+    ports: ["8088:80"]
+    depends_on: [users, courses, exams, messaging, forum, calendar]
+    networks: [ent-net]
+
+  frontend:
+    container_name: frontend
+    build: ./frontend
+    ports: ["3000:3000"]
+    environment:
+      VITE_API_URL: http://localhost:8088
+    networks: [ent-net]
+
+  rabbitmq:
+    image: rabbitmq:3.13-management-alpine
+    container_name: rabbitmq
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    environment:
+      RABBITMQ_DEFAULT_USER: ent_user
+      RABBITMQ_DEFAULT_PASS: ent_pass_2024
+    networks: [ent-net]
+    healthcheck:
+      test: ["CMD","rabbitmq-diagnostics","ping"]
+      interval: 20s
+      timeout: 10s
+      retries: 10
+      start_period: 40s
+
+  notifications:
+    build: ./services/notifications
+    container_name: notifications
+    environment:
+      CASSANDRA_HOSTS: cassandra
+      JWT_SECRET: super_secret_jwt_key_2024
+      KEYCLOAK_URL: http://ent-est-v2-keycloak-1:8080
+      KEYCLOAK_REALM: est
+      RABBITMQ_URL: amqp://ent_user:ent_pass_2024@rabbitmq:5672/
+    depends_on:
+      cassandra: {condition: service_healthy}
+      rabbitmq:  {condition: service_healthy}
+    networks: [ent-net]
+
+networks:
+  ent-net:
+    driver: bridge
+
+volumes:
+  cassandra_data:
+  minio_data:
+
