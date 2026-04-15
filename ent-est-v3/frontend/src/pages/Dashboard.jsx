@@ -36,12 +36,12 @@ export default function Dashboard({ user, nav, setNav, onLogout }) {
 
   useEffect(() => {
     loadNotifs()
-    const t = setInterval(loadNotifs, 5000)
+    const t = setInterval(loadNotifs, 15000)
     return () => clearInterval(t)
   }, [])
 
   useEffect(() => {
-    const t = setInterval(() => setRefreshKey(k => k+1), 5000)
+    const t = setInterval(() => setRefreshKey(k => k+1), 15000)
     return () => clearInterval(t)
   }, [])
 
