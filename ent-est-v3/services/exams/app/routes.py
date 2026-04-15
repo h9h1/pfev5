@@ -27,6 +27,11 @@ def get_exam_or_403(s, exam_id, teacher_id):
     if str(e.teacher_id) != teacher_id: raise HTTPException(403, "Vous n'êtes pas le propriétaire de cet examen")
     return e
 
+def require_admin(me=Depends(verify_token)):
+    if me.get('role') != 'admin':
+        raise HTTPException(403, "Réservé à l'administrateur")
+    return me
+
 class ExamCreate(BaseModel):
     title: str
     course_id: str
@@ -108,22 +113,20 @@ def download_sujet(exam_id: str, me=Depends(verify_token)):
 
 @router.post("/submissions", status_code=201)
 def create_submission(exam_id: str, me=Depends(verify_token)):
-    # Seulement les étudiants
     if me['role'] not in ('student',):
         raise HTTPException(403, "Seuls les étudiants peuvent rendre un devoir")
     s = get_session()
     uid = uuid.uuid4()
-    s.execute("INSERT INTO submissions (id,exam_id,student_id,student_name,submitted_at) VALUES (%s,%s,%s,%s,%s)",
+    s.execute("INSERT INTO submissions (id,exam_id,student_id,student_name,submitted_at,grade_approved) VALUES (%s,%s,%s,%s,%s,%s)",
         (uid, uuid.UUID(exam_id), uuid.UUID(me['sub']),
          f"{me['first_name']} {me['last_name']}".strip() or me['username'],
-         datetime.datetime.utcnow()))
+         datetime.datetime.utcnow(), False))
     return {"id": str(uid)}
 
 @router.post("/submissions/{sub_id}/upload")
 def upload_submission(sub_id: str, exam_id: str, file: UploadFile = File(...), me=Depends(verify_token)):
     if me['role'] not in ('student',):
         raise HTTPException(403, "Seuls les étudiants peuvent soumettre un devoir")
-    # Vérifier que la soumission appartient à cet étudiant
     s = get_session()
     rows = s.execute("SELECT student_id FROM submissions WHERE id=%s ALLOW FILTERING", (uuid.UUID(sub_id),))
     r = next(iter(rows), None)
@@ -144,7 +147,6 @@ def download_submission(sub_id: str, me=Depends(verify_token)):
     rows = s.execute("SELECT minio_key,student_id FROM submissions WHERE id=%s ALLOW FILTERING", (uuid.UUID(sub_id),))
     r = next(iter(rows), None)
     if not r or not r.minio_key: raise HTTPException(404)
-    # Étudiant peut télécharger sa propre copie, prof peut tout télécharger
     if me['role'] == 'student' and str(r.student_id) != me['sub']:
         raise HTTPException(403, "Accès non autorisé")
     obj = mc().get_object(BD, r.minio_key)
@@ -155,18 +157,105 @@ def download_submission(sub_id: str, me=Depends(verify_token)):
                  "Access-Control-Expose-Headers": "Content-Disposition"})
 
 @router.get("/exams/{exam_id}/submissions")
-def list_submissions(exam_id: str, me=Depends(require_teacher)):
-    rows = get_session().execute("SELECT id,student_id,student_name,minio_key,grade,comment,submitted_at FROM submissions WHERE exam_id=%s ALLOW FILTERING", (uuid.UUID(exam_id),))
+def list_submissions(exam_id: str, me=Depends(verify_token)):
+    if me.get('role') not in ('teacher', 'admin'):
+        raise HTTPException(403, "Réservé aux enseignants et administrateurs")
+    rows = get_session().execute(
+        "SELECT id,student_id,student_name,minio_key,grade,comment,submitted_at,grade_approved FROM submissions WHERE exam_id=%s ALLOW FILTERING",
+        (uuid.UUID(exam_id),))
     return [{"id":str(r.id),"student_id":str(r.student_id),"student_name":r.student_name,
-             "minio_key":r.minio_key,"grade":r.grade,"comment":r.comment,"submitted_at":str(r.submitted_at)} for r in rows]
+             "minio_key":r.minio_key,"grade":r.grade,"comment":r.comment,
+             "submitted_at":str(r.submitted_at),
+             "grade_approved": r.grade_approved if r.grade_approved is not None else False}
+            for r in rows]
 
 @router.patch("/submissions/{sub_id}/grade")
 def grade_sub(sub_id: str, payload: GradeUpdate, me=Depends(require_teacher)):
     s = get_session()
     rows = s.execute("SELECT id FROM submissions WHERE id=%s ALLOW FILTERING", (uuid.UUID(sub_id),))
     if not next(iter(rows), None): raise HTTPException(404)
-    s.execute("UPDATE submissions SET grade=%s,comment=%s WHERE id=%s", (payload.grade, payload.comment, uuid.UUID(sub_id)))
-    return {"status": "noté", "grade": payload.grade}
+    # Save grade but mark as NOT approved — admin must approve before student sees it
+    s.execute(
+        "UPDATE submissions SET grade=%s, comment=%s, grade_approved=%s WHERE id=%s",
+        (payload.grade, payload.comment, False, uuid.UUID(sub_id))
+    )
+    return {"status": "noté", "grade": payload.grade, "grade_approved": False}
+
+# ── Admin: list all submissions waiting for grade approval ──────────────────
+@router.get("/submissions/pending-approval")
+def pending_approval(me=Depends(verify_token)):
+    if me.get('role') != 'admin':
+        raise HTTPException(403, "Réservé à l'administrateur")
+    s = get_session()
+    rows = s.execute(
+        "SELECT id,exam_id,student_id,student_name,grade,comment,submitted_at,grade_approved,minio_key FROM submissions ALLOW FILTERING"
+    )
+    pending = []
+    for r in rows:
+        if r.grade is not None and not r.grade_approved:
+            exam_rows = s.execute("SELECT title,exam_type FROM exams WHERE id=%s", (r.exam_id,))
+            exam = next(iter(exam_rows), None)
+            pending.append({
+                "id": str(r.id),
+                "exam_id": str(r.exam_id),
+                "exam_title": exam.title if exam else "—",
+                "exam_type":  exam.exam_type if exam else "—",
+                "student_id": str(r.student_id),
+                "student_name": r.student_name,
+                "grade": r.grade,
+                "comment": r.comment,
+                "submitted_at": str(r.submitted_at),
+                "grade_approved": False,
+                "minio_key": getattr(r, 'minio_key', None)
+            })
+    return pending
+
+# ── Admin: approve a grade ──────────────────────────────────────────────────
+@router.patch("/submissions/{sub_id}/approve-grade")
+def approve_grade(sub_id: str, me=Depends(verify_token)):
+    if me.get('role') != 'admin':
+        raise HTTPException(403, "Réservé à l'administrateur")
+    s = get_session()
+    rows = s.execute(
+        "SELECT id,grade,student_id,student_name FROM submissions WHERE id=%s ALLOW FILTERING",
+        (uuid.UUID(sub_id),)
+    )
+    r = next(iter(rows), None)
+    if not r: raise HTTPException(404, "Soumission introuvable")
+    if r.grade is None: raise HTTPException(400, "Aucune note à approuver")
+    s.execute(
+        "UPDATE submissions SET grade_approved=%s WHERE id=%s",
+        (True, uuid.UUID(sub_id))
+    )
+    # Notify student
+    publish_grade_event(r.student_name, r.grade)
+    return {"status": "approuvé", "grade": r.grade}
+
+# ── Student: get my grades (approved only) ─────────────────────────────────
+@router.get("/submissions/my-grades")
+def my_grades(me=Depends(verify_token)):
+    if me['role'] != 'student':
+        raise HTTPException(403, "Réservé aux étudiants")
+    s = get_session()
+    rows = s.execute(
+        "SELECT id,exam_id,grade,comment,submitted_at,grade_approved FROM submissions WHERE student_id=%s ALLOW FILTERING",
+        (uuid.UUID(me['sub']),)
+    )
+    result = []
+    for r in rows:
+        if r.grade is not None and r.grade_approved:
+            exam_rows = s.execute("SELECT title,exam_type FROM exams WHERE id=%s", (r.exam_id,))
+            exam = next(iter(exam_rows), None)
+            result.append({
+                "submission_id": str(r.id),
+                "exam_id": str(r.exam_id),
+                "exam_title": exam.title if exam else "—",
+                "exam_type":  exam.exam_type if exam else "—",
+                "grade": r.grade,
+                "comment": r.comment,
+                "submitted_at": str(r.submitted_at)
+            })
+    return result
 
 def publish_grade_event(student_name, grade):
     try:
@@ -176,8 +265,8 @@ def publish_grade_event(student_name, grade):
         ch = conn.channel()
         ch.exchange_declare(exchange='ent_events', exchange_type='fanout', durable=True)
         msg = json.dumps({'type':'new_grade','data':{
-            'title': 'Devoir noté',
-            'message': f"Votre devoir a été noté : {grade}/20",
+            'title': 'Note disponible',
+            'message': f"Votre devoir a été noté et approuvé : {grade}/20",
             'target_role': 'student'
         },'ts': dt.datetime.utcnow().isoformat()})
         ch.basic_publish(exchange='ent_events', routing_key='', body=msg,

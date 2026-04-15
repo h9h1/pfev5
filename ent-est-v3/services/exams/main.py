@@ -15,7 +15,13 @@ def startup():
         minio_key text, minio_bucket text, created_at timestamp)""")
     s.execute("""CREATE TABLE IF NOT EXISTS submissions (
         id uuid PRIMARY KEY, exam_id uuid, student_id uuid, student_name text,
-        minio_key text, grade float, comment text, submitted_at timestamp)""")
+        minio_key text, grade float, comment text, submitted_at timestamp,
+        grade_approved boolean)""")
+    # Add grade_approved column if upgrading from old schema (safe on existing clusters)
+    try:
+        s.execute("ALTER TABLE submissions ADD grade_approved boolean")
+    except Exception:
+        pass  # Column already exists
 
 @app.get("/health")
 def health(): return {"status":"ok"}

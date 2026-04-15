@@ -1,7 +1,6 @@
 services:
   cassandra:
     image: cassandra:4.1
-    
     ports: ["9042:9042"]
     environment:
       CASSANDRA_CLUSTER_NAME: ent-cluster
@@ -16,6 +15,18 @@ services:
       timeout: 10s
       retries: 15
       start_period: 90s
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:24.0
+    container_name: keycloak
+    command: start-dev --import-realm
+    environment:
+      KEYCLOAK_ADMIN: admin
+      KEYCLOAK_ADMIN_PASSWORD: admin
+    volumes:
+      - ./keycloak/est-realm.json:/opt/keycloak/data/import/est-realm.json
+    ports: ["8080:8080"]
+    networks: [ent-net]
 
   minio:
     image: minio/minio:latest
@@ -79,7 +90,7 @@ services:
       JWT_SECRET: super_secret_jwt_key_2024
       USERS_URL: http://users:8000
       RABBITMQ_URL: amqp://ent_user:ent_pass_2024@rabbitmq:5672/
-      KEYCLOAK_URL: http://ent-est-v2-keycloak-1:8080
+      KEYCLOAK_URL: http://keycloak:8080
       KEYCLOAK_REALM: est
     depends_on:
       cassandra: {condition: service_healthy}
@@ -109,7 +120,7 @@ services:
     container_name: gateway
     build: ./gateway
     ports: ["8088:80"]
-    depends_on: [users, courses, exams, messaging, forum, calendar]
+    depends_on: [users, courses, exams, messaging, forum, calendar, keycloak]
     networks: [ent-net]
 
   frontend:
@@ -143,7 +154,7 @@ services:
     environment:
       CASSANDRA_HOSTS: cassandra
       JWT_SECRET: super_secret_jwt_key_2024
-      KEYCLOAK_URL: http://ent-est-v2-keycloak-1:8080
+      KEYCLOAK_URL: http://keycloak:8080
       KEYCLOAK_REALM: est
       RABBITMQ_URL: amqp://ent_user:ent_pass_2024@rabbitmq:5672/
     depends_on:

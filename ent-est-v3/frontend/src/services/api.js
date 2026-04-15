@@ -42,16 +42,22 @@ export const coursesAPI = {
 }
 
 export const examsAPI = {
-  list:              ()         => api.get('/exams/exams'),
-  create:            d          => api.post('/exams/exams',d),
-  uploadSujet:       (id,f)     => { const fd=new FormData(); fd.append('file',f); return api.post(`/exams/exams/${id}/upload-sujet`,fd) },
-  downloadSujet:     id         => api.get(`/exams/exams/${id}/sujet/download`,{responseType:'blob'}),
-  createSubmission:  eid        => api.post(`/exams/submissions?exam_id=${eid}`),
-  uploadSubmission:  (sid,eid,f)=> { const fd=new FormData(); fd.append('file',f); return api.post(`/exams/submissions/${sid}/upload?exam_id=${eid}`,fd) },
-  downloadSubmission:sid        => api.get(`/exams/submissions/${sid}/download`,{responseType:'blob'}),
-  listSubmissions:   eid        => api.get(`/exams/exams/${eid}/submissions`),
-  deleteExam: id         => api.delete(`/exams/exams/${id}`),
-  grade:             (sid,d)    => api.patch(`/exams/submissions/${sid}/grade`,d)
+  list:               ()          => api.get('/exams/exams'),
+  create:             d           => api.post('/exams/exams',d),
+  uploadSujet:        (id,f)      => { const fd=new FormData(); fd.append('file',f); return api.post(`/exams/exams/${id}/upload-sujet`,fd) },
+  downloadSujet:      id          => api.get(`/exams/exams/${id}/sujet/download`,{responseType:'blob'}),
+  createSubmission:   eid         => api.post(`/exams/submissions?exam_id=${eid}`),
+  uploadSubmission:   (sid,eid,f) => { const fd=new FormData(); fd.append('file',f); return api.post(`/exams/submissions/${sid}/upload?exam_id=${eid}`,fd) },
+  downloadSubmission: sid         => api.get(`/exams/submissions/${sid}/download`,{responseType:'blob'}),
+  listSubmissions:    eid         => api.get(`/exams/exams/${eid}/submissions`),
+  deleteExam:         id          => api.delete(`/exams/exams/${id}`),
+  grade:              (sid,d)     => api.patch(`/exams/submissions/${sid}/grade`,d),
+  // Admin
+  pendingApproval:    ()          => api.get('/exams/submissions/pending-approval'),
+
+  approveGrade:       sid         => api.patch(`/exams/submissions/${sid}/approve-grade`),
+  // Student
+  myGrades:           ()          => api.get('/exams/submissions/my-grades')
 }
 
 export const messagingAPI = {
